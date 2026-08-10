@@ -4,7 +4,7 @@ import urllib.parse
 import os
 
 # ==========================================
-# 1. 설정 정보
+# 1. 설정 정보 (사용자 정보 및 확인된 API URL)
 # ==========================================
 NOTION_TOKEN = "ntn_n9230455858ahP4EMhkrguf0ld3JV7xXfM2hA9FQ1Ywbzj"
 PARKING_DATABASE_ID = "3b82262d943280079f7fec552cce02ae"
@@ -66,67 +66,64 @@ def add_parking_to_notion(name, region, address, capacity, operating_days, fee_i
         print(f"❌ 노션 등록 에러: {e}")
 
 # ==========================================
-# 4. 공공데이터 API 수집 (다중 엔드포인트 지원)
+# 4. 공공데이터 API 수집 (tn_pubr_prkplce_info_api 규격)
 # ==========================================
 def fetch_parking_data():
     decoded_key = urllib.parse.unquote(PUBLIC_DATA_KEY)
+    
+    # 전달받으신 정확한 API 호출 URL 적용
+    base_url = "https://api.data.go.kr/openapi/tn_pubr_prkplce_info_api"
     
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     }
 
-    # 공공데이터포털 주요 주차장 API 엔드포인트 목록
-    endpoints = [
-        "http://api.data.go.kr/openapi/tn_pubr_public_prkplce_api",
-        "http://apis.data.go.kr/1613000/PublicParkingInfoService/getParkingInfo",
-        "https://api.data.go.kr/openapi/tn_pubr_public_prkplce_api"
-    ]
+    params = {
+        'serviceKey': decoded_key,
+        'type': 'json',
+        'pageNo': '1',
+        'numOfRows': '200'
+    }
 
-    items = []
-    for url in endpoints:
-        params = {
-            'serviceKey': decoded_key,
-            'type': 'json',
-            'pageNo': '1',
-            'numOfRows': '200'
-        }
-        try:
-            print(f"📡 API 요청 시도: {url}")
-            res = requests.get(url, params=params, headers=headers, timeout=15)
-            
-            if res.status_code == 200 and "NO_OPENAPI_SERVICE_ERROR" not in res.text:
+    try:
+        print("📡 전국 주차장 표준데이터 API 수집 시작...")
+        res = requests.get(base_url, params=params, headers=headers, timeout=20)
+        print(f"📡 API 응답 코드: {res.status_code}")
+        
+        if res.status_code == 200:
+            try:
                 data = res.json()
                 items = data.get('response', {}).get('body', {}).get('items', [])
-                if items:
-                    print(f"✅ API 연결 성공! ({len(items)}건 수집됨)")
-                    break
-        except Exception as e:
-            continue
+                print(f"📊 수집된 주차장 건수: {len(items)}건")
 
-    if not items:
-        print("❌ 공공데이터 API 연결 실패. 마이페이지에서 신청하신 API의 정확한 '오픈API 호출 URL' 확인이 필요합니다.")
-        return
+                for item in items:
+                    name = item.get('prkplceNm', '이름없음')
+                    rd_addr = item.get('rdnmadr', '')
+                    ln_addr = item.get('lnmadr', '')
+                    address = rd_addr if rd_addr else (ln_addr if ln_addr else '주소미상')
+                    
+                    addr_parts = address.split()
+                    region = f"{addr_parts[0]} {addr_parts[1]}" if len(addr_parts) > 1 else (addr_parts[0] if addr_parts else '기타')
+                    
+                    # 표준 데이터의 주차구획수 항목(prkplceCnt) 매핑
+                    capacity_raw = item.get('prkplceCnt', item.get('prkplceSe', '0'))
+                    capacity = int(capacity_raw) if str(capacity_raw).isdigit() else 0
+                    
+                    operating_days = item.get('operDay', '연중무휴')
+                    fee_type = item.get('parkingchrgeInfo', '무료')
+                    basic_time = item.get('basicTime', '')
+                    basic_charge = item.get('basicCharge', '')
+                    
+                    fee_info = f"{fee_type} ({basic_time}분당 {basic_charge}원)" if basic_charge else fee_type
+                    phone = item.get('phoneNumber', '')
 
-    for item in items:
-        name = item.get('prkplceNm') or item.get('parkingName') or '이름없음'
-        rd_addr = item.get('rdnmadr', '')
-        ln_addr = item.get('lnmadr', '')
-        address = rd_addr if rd_addr else (ln_addr if ln_addr else item.get('address', '주소미상'))
-        
-        addr_parts = address.split()
-        region = f"{addr_parts[0]} {addr_parts[1]}" if len(addr_parts) > 1 else (addr_parts[0] if addr_parts else '기타')
-        
-        capacity_raw = item.get('prkplceSe') or item.get('tpkct') or '0'
-        capacity = int(capacity_raw) if str(capacity_raw).isdigit() else 0
-        
-        operating_days = item.get('operDay', '연중무휴')
-        fee_type = item.get('parkingchrgeInfo', '무료')
-        basic_time = item.get('basicTime', '')
-        basic_charge = item.get('basicCharge', '')
-        
-        fee_info = f"{fee_type} ({basic_time}분당 {basic_charge}원)" if basic_charge else fee_type
-        phone = item.get('phoneNumber') or item.get('phoneNumber', '')
-
-        add_parking_to_notion(name, region, address, capacity, operating_days, fee_info, phone)
+                    add_parking_to_notion(name, region, address, capacity, operating_days, fee_info, phone)
+            except Exception as parse_e:
+                print(f"⚠️ 데이터 파싱 에러: {parse_e}")
+                print(f"응답 내용: {res.text[:200]}")
+        else:
+            print(f"❌ API 실패 응답: {res.text[:200]}")
+    except Exception as e:
+        print(f"❌ 주차장 데이터 수집 에러: {e}")
 
 fetch_parking_data()
