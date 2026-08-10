@@ -67,33 +67,39 @@ def add_parking_to_notion(name, region, address, capacity, operating_days, fee_i
         print(f"❌ 노션 등록 에러: {e}")
 
 # ==========================================
-# 4. 공공데이터 API 수집 (다양한 JSON 응답 구조 호환)
+# 4. 공공데이터 API 수집 (HTTP 우회 접속)
 # ==========================================
 def fetch_parking_data():
-    # URL 직접 조합으로 인증키 변형 방지
     decoded_key = urllib.parse.unquote(PUBLIC_DATA_KEY)
-    encoded_key = urllib.parse.quote(decoded_key)
     
-    request_url = f"https://api.data.go.kr/openapi/tn_pubr_prkplce_info_api?serviceKey={encoded_key}&type=json&pageNo=1&numOfRows=50"
+    # 해외 IP SSL 타임아웃 차단을 우회하기 위해 http 사용
+    base_url = "http://api.data.go.kr/openapi/tn_pubr_prkplce_info_api"
     
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    }
+
+    params = {
+        'serviceKey': decoded_key,
+        'type': 'json',
+        'pageNo': '1',
+        'numOfRows': '50'
     }
 
     res = None
     for attempt in range(3):
         try:
             print(f"📡 API 요청 시도 ({attempt+1}/3)...")
-            res = requests.get(request_url, headers=headers, timeout=30)
+            res = requests.get(base_url, params=params, headers=headers, timeout=15)
             if res.status_code == 200:
                 break
             time.sleep(2)
         except Exception as e:
-            print(f"⚠️ 요청 지연: {e}")
+            print(f"⚠️ 접속 지연 발생: {e}")
             time.sleep(2)
 
     if not res or res.status_code != 200:
-        print(f"❌ API 접속 실패: {res.status_code if res else '응답 없음'}")
+        print(f"❌ API 접속 실패 (공공데이터포털 서버 차단 지속 중)")
         return
 
     try:
@@ -103,21 +109,11 @@ def fetch_parking_data():
         print(f"📊 공공데이터 전체 주차장 수: {total_count}건")
 
         raw_items = body.get('items', [])
-        items = []
+        items = raw_items if isinstance(raw_items, list) else raw_items.get('item', [])
+        if isinstance(items, dict):
+            items = [items]
 
-        # JSON 응답 형태별 추출 (리스트 vs 딕셔너리 내 'item' 키)
-        if isinstance(raw_items, list):
-            items = raw_items
-        elif isinstance(raw_items, dict):
-            items = raw_items.get('item', [])
-            if isinstance(items, dict):
-                items = [items]
-
-        print(f"📊 이번 회차 수집 대상: {len(items)}건")
-
-        if len(items) == 0:
-            print(f"🔍 원본 응답 확인: {res.text[:300]}")
-            return
+        print(f"📊 수집 대상: {len(items)}건")
 
         for item in items:
             name = item.get('prkplceNm', '이름없음')
@@ -143,6 +139,5 @@ def fetch_parking_data():
 
     except Exception as parse_e:
         print(f"⚠️ 데이터 파싱 에러: {parse_e}")
-        print(f"응답 본문 샘플: {res.text[:300]}")
 
 fetch_parking_data()
