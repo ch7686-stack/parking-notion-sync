@@ -4,7 +4,7 @@ import urllib.parse
 import os
 
 # ==========================================
-# 1. 설정 정보
+# 1. 설정 정보 (인증키 및 노션 토큰/DB ID 완료)
 # ==========================================
 NOTION_TOKEN = "ntn_n9230455858ahP4EMhkrguf0ld3JV7xXfM2hA9FQ1Ywbzj"
 PARKING_DATABASE_ID = "3b82262d943280079f7fec552cce02ae"
@@ -17,7 +17,7 @@ notion_headers = {
 }
 
 # ==========================================
-# 2. 노션 중복 체크
+# 2. 노션 데이터 중복 체크
 # ==========================================
 def check_duplicate(parking_name, address):
     url = f"https://api.notion.com/v1/databases/{PARKING_DATABASE_ID}/query"
@@ -66,19 +66,26 @@ def add_parking_to_notion(name, region, address, capacity, operating_days, fee_i
         print(f"❌ 노션 등록 에러: {e}")
 
 # ==========================================
-# 4. 공공데이터 API 수집 (HTTPS 및 안전 주소 연결)
+# 4. 공공데이터 API 수집
 # ==========================================
 def fetch_parking_data():
     decoded_key = urllib.parse.unquote(PUBLIC_DATA_KEY)
+    base_url = "http://api.data.go.kr/openapi/tn_pubr_public_prkplce_api"
     
-    # 공공데이터포털 전국공영주차장 표준 API (HTTPS 규격 사용)
-    base_url = "https://api.data.go.kr/openapi/tn_pubr_public_prkplce_api"
-    
-    # URL 조합 시 serviceKey 직접 인코딩 조합
-    request_url = f"{base_url}?serviceKey={urllib.parse.quote(decoded_key)}&type=json&pageNo=1&numOfRows=200"
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    }
+
+    params = {
+        'serviceKey': decoded_key,
+        'type': 'json',
+        'pageNo': '1',
+        'numOfRows': '200'
+    }
 
     try:
-        res = requests.get(request_url, timeout=20)
+        print("📡 전국 공영주차장 공공데이터 API 요청 중...")
+        res = requests.get(base_url, params=params, headers=headers, timeout=20)
         print(f"📡 API 응답 코드: {res.status_code}")
         
         if res.status_code == 200:
@@ -96,8 +103,8 @@ def fetch_parking_data():
                     addr_parts = address.split()
                     region = f"{addr_parts[0]} {addr_parts[1]}" if len(addr_parts) > 1 else (addr_parts[0] if addr_parts else '기타')
                     
-                    raw_cap = item.get('prkplceSe', '0')
-                    capacity = int(raw_cap) if str(raw_cap).isdigit() else 0
+                    capacity_raw = item.get('prkplceSe', '0')
+                    capacity = int(capacity_raw) if str(capacity_raw).isdigit() else 0
                     
                     operating_days = item.get('operDay', '연중무휴')
                     fee_type = item.get('parkingchrgeInfo', '무료')
