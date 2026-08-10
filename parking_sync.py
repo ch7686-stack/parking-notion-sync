@@ -1,6 +1,6 @@
 import requests
 import json
-import xml.etree.ElementTree as ET
+import urllib.parse
 import os
 
 # ==========================================
@@ -66,14 +66,19 @@ def add_parking_to_notion(name, region, address, capacity, operating_days, fee_i
         print(f"❌ 노션 등록 에러: {e}")
 
 # ==========================================
-# 4. 공공데이터 API 수집 (JSON/XML 호환 처리)
+# 4. 공공데이터 API 수집 (HTTPS 및 안전 주소 연결)
 # ==========================================
 def fetch_parking_data():
-    # 공공데이터포털 표준 주차장 API
-    url = f"http://api.data.go.kr/openapi/tn_pubr_public_prkplce_api?serviceKey={PUBLIC_DATA_KEY}&type=json&numOfRows=100&pageNo=1"
+    decoded_key = urllib.parse.unquote(PUBLIC_DATA_KEY)
+    
+    # 공공데이터포털 전국공영주차장 표준 API (HTTPS 규격 사용)
+    base_url = "https://api.data.go.kr/openapi/tn_pubr_public_prkplce_api"
+    
+    # URL 조합 시 serviceKey 직접 인코딩 조합
+    request_url = f"{base_url}?serviceKey={urllib.parse.quote(decoded_key)}&type=json&pageNo=1&numOfRows=200"
 
     try:
-        res = requests.get(url, timeout=20)
+        res = requests.get(request_url, timeout=20)
         print(f"📡 API 응답 코드: {res.status_code}")
         
         if res.status_code == 200:
@@ -104,8 +109,10 @@ def fetch_parking_data():
 
                     add_parking_to_notion(name, region, address, capacity, operating_days, fee_info, phone)
             except Exception as parse_e:
-                print(f"⚠️ JSON 파싱 실패 (XML 응답 가능성): {parse_e}")
-                print(f"응답 샘플: {res.text[:200]}")
+                print(f"⚠️ 데이터 파싱 에러: {parse_e}")
+                print(f"응답 내용: {res.text[:200]}")
+        else:
+            print(f"❌ API 실패 응답: {res.text[:200]}")
     except Exception as e:
         print(f"❌ 주차장 데이터 수집 에러: {e}")
 
